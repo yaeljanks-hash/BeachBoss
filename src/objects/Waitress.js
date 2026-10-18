@@ -1,5 +1,6 @@
 import Character from './Character.js';
 import { SPEED } from '../config.js';
+import { drawNotepad } from '../ui/icons.js';
 
 const COLORS = {
   skin: 0xf5c9a0,
@@ -14,11 +15,105 @@ const COLORS = {
   mouth: 0x7a3b2e
 };
 
-/** The player character: an original cartoon waitress drawn with Phaser graphics. */
+/**
+ * The player character: an original cartoon waitress drawn with Phaser graphics.
+ *
+ * She can hold any number of order tickets but only one item on her tray. An
+ * "activity" is something she does while standing still (like wiping a table);
+ * walking anywhere cancels it.
+ */
 export default class Waitress extends Character {
   constructor(scene, x, y) {
     super(scene, x, y, SPEED.waitress);
-    this.figure.add(this.drawArt(scene));
+
+    this.carrying = null; // Order on the tray
+    this.tickets = []; // Orders taken but not yet handed to the bar
+    this.activity = null; // { cancel() } while busy at a spot
+
+    this.trayItem = scene.add.container(22, -41);
+    this.figure.add([this.drawArt(scene), this.trayItem]);
+
+    this.ticketBadge = this.createTicketBadge(scene);
+    this.add(this.ticketBadge);
+  }
+
+  walkTo(x, y, onArrive) {
+    this.cancelActivity();
+    super.walkTo(x, y, onArrive);
+  }
+
+  // --- Carrying -------------------------------------------------------------
+
+  get handsFree() {
+    return this.carrying === null;
+  }
+
+  carry(order, icon) {
+    this.carrying = order;
+    this.trayItem.add(icon.setScale(0.75));
+  }
+
+  /** Hand over whatever is on the tray and return it. */
+  dropCarried() {
+    const order = this.carrying;
+    this.carrying = null;
+    this.trayItem.removeAll(true);
+    return order;
+  }
+
+  // --- Tickets --------------------------------------------------------------
+
+  addTicket(order) {
+    this.tickets.push(order);
+    this.refreshTicketBadge();
+  }
+
+  /** Throw away one ticket (its guest has left). */
+  removeTicket(order) {
+    this.tickets = this.tickets.filter(t => t !== order);
+    this.refreshTicketBadge();
+  }
+
+  /** Hand all tickets to the bar. */
+  takeTickets() {
+    const tickets = this.tickets;
+    this.tickets = [];
+    this.refreshTicketBadge();
+    return tickets;
+  }
+
+  refreshTicketBadge() {
+    const count = this.tickets.length;
+    this.ticketBadge.setVisible(count > 0);
+    this.ticketCountText.setText(count > 1 ? `x${count}` : '');
+  }
+
+  createTicketBadge(scene) {
+    const g = scene.add.graphics();
+    drawNotepad(g);
+    this.ticketCountText = scene.add
+      .text(10, 2, '', { fontSize: '12px', color: '#ffffff', fontStyle: 'bold' })
+      .setOrigin(0, 0.5)
+      .setShadow(1, 1, '#000000', 2);
+    return scene.add.container(0, -92, [g, this.ticketCountText]).setVisible(false);
+  }
+
+  // --- Activities -----------------------------------------------------------
+
+  startActivity(cancel) {
+    this.cancelActivity();
+    this.activity = { cancel };
+  }
+
+  /** Mark the current activity as finished (no cancel callback). */
+  finishActivity() {
+    this.activity = null;
+  }
+
+  cancelActivity() {
+    const activity = this.activity;
+    this.activity = null;
+    activity?.cancel();
   }
 
   drawArt(scene) {

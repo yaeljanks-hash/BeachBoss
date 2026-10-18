@@ -47,6 +47,16 @@ export default class Character extends Phaser.GameObjects.Container {
     });
   }
 
+  /** Walk through a list of {x, y} points in order, then call onArrive. */
+  walkPath(points, onArrive) {
+    const [next, ...rest] = points;
+    if (!next) {
+      onArrive?.();
+      return;
+    }
+    this.walkTo(next.x, next.y, () => this.walkPath(rest, onArrive));
+  }
+
   stopWalking() {
     this.scene.tweens.killTweensOf(this);
     this.stopBob();

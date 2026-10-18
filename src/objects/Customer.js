@@ -1,6 +1,9 @@
 import Phaser from 'phaser';
 import Character from './Character.js';
-import { SPEED } from '../config.js';
+import { SPEED, PATIENCE } from '../config.js';
+import StateMachine from '../systems/StateMachine.js';
+import PatienceBar from '../ui/PatienceBar.js';
+import SpeechBubble from '../ui/SpeechBubble.js';
 
 const PALETTE = {
   skin: [0xffdbb5, 0xf5c9a0, 0xe0a878, 0xa86b45, 0x7a4a2c],
@@ -11,18 +14,53 @@ const PALETTE = {
 };
 
 export const CustomerState = {
-  ARRIVING: 'arriving',
-  WAITING: 'waiting',
+  ARRIVING: 'arriving', // walking to the line
+  WAITING: 'waiting', // in line, can be seated
   WALKING_TO_TABLE: 'walkingToTable',
-  SEATED: 'seated'
+  SEATED: 'seated', // reading the menu
+  READY_TO_ORDER: 'readyToOrder',
+  WAITING_FOR_ORDER: 'waitingForOrder', // order taken, waiting for it to arrive
+  EATING: 'eating', // eating or drinking
+  LEAVING: 'leaving' // walking away (paid, or ran out of patience)
 };
 
-/** A beach guest with randomised colours. Arrives, waits in line, then sits at a table. */
+// The states in which a guest's patience runs down
+export const PATIENCE_DRAINING_STATES = {
+  [CustomerState.WAITING]: 'waitingMs',
+  [CustomerState.READY_TO_ORDER]: 'seatedMs',
+  [CustomerState.WAITING_FOR_ORDER]: 'seatedMs'
+};
+
+const TRANSITIONS = {
+  [CustomerState.ARRIVING]: [CustomerState.WAITING],
+  [CustomerState.WAITING]: [CustomerState.WALKING_TO_TABLE, CustomerState.LEAVING],
+  [CustomerState.WALKING_TO_TABLE]: [CustomerState.SEATED],
+  [CustomerState.SEATED]: [CustomerState.READY_TO_ORDER],
+  [CustomerState.READY_TO_ORDER]: [CustomerState.WAITING_FOR_ORDER, CustomerState.LEAVING],
+  [CustomerState.WAITING_FOR_ORDER]: [CustomerState.EATING, CustomerState.LEAVING],
+  [CustomerState.EATING]: [CustomerState.LEAVING],
+  [CustomerState.LEAVING]: []
+};
+
+let nextCustomerId = 1;
+
+/**
+ * A beach guest with randomised colours. Arrives, waits in line, sits at a
+ * table, orders, eats, pays and leaves - or walks out if kept waiting too long.
+ *
+ * `patience` runs from 1 (happy) to 0 (leaving). The scene drains it while the
+ * guest is in one of PATIENCE_DRAINING_STATES.
+ */
 export default class Customer extends Character {
   constructor(scene, x, y) {
     super(scene, x, y, SPEED.customer);
 
-    this.state = CustomerState.ARRIVING;
+    this.id = nextCustomerId++;
+    this.fsm = new StateMachine(`Customer ${this.id}`, CustomerState.ARRIVING, TRANSITIONS);
+    this.order = null;
+    this.patience = 1;
+    this.leftUnhappy = false;
+    this.mood = null;
 
     const rnd = Phaser.Math.RND;
     this.colors = {
@@ -40,11 +78,70 @@ export default class Customer extends Character {
 
     this.standingLegs = this.drawStandingLegs(scene);
     this.seatedLegs = this.drawSeatedLegs(scene).setVisible(false);
-    this.figure.add([this.standingLegs, this.seatedLegs, this.drawUpperBody(scene)]);
+    this.mouth = scene.add.graphics();
+    this.figure.add([this.standingLegs, this.seatedLegs, this.drawUpperBody(scene), this.mouth]);
+
+    // Patience meter above the head, and a bubble for leaving unhappy
+    this.patienceBar = new PatienceBar(scene, 0, -90);
+    this.bubble = new SpeechBubble(scene, 3, -96);
+    this.add([this.patienceBar, this.bubble]);
+    this.setMood('happy');
+  }
+
+  // --- Patience -------------------------------------------------------------
+
+  /** Lose `deltaMs` worth of a meter that lasts `fullMs`. Returns true when it runs out. */
+  drainPatience(deltaMs, fullMs) {
+    this.setPatience(this.patience - deltaMs / fullMs);
+    return this.patience <= 0;
+  }
+
+  setPatience(value) {
+    this.patience = Phaser.Math.Clamp(value, 0, 1);
+    this.patienceBar.setProgress(this.patience);
+    if (this.patience < PATIENCE.criticalBelow) this.setMood('upset');
+    else if (this.patience < PATIENCE.warningBelow) this.setMood('worried');
+    else this.setMood('happy');
+  }
+
+  showPatience(visible) {
+    this.patienceBar.setVisible(visible);
+  }
+
+  /** Redraw the mouth (and brows) for 'happy', 'worried' or 'upset'. */
+  setMood(mood) {
+    if (this.mood === mood) return;
+    this.mood = mood;
+    const g = this.mouth;
+    g.clear();
+    g.lineStyle(1.5, 0x6d3b2e);
+    if (mood === 'happy') {
+      g.beginPath();
+      g.arc(5, -58, 3, 0.3, Math.PI - 0.6);
+      g.strokePath();
+    } else if (mood === 'worried') {
+      g.lineBetween(3, -56, 8, -56);
+    } else {
+      g.beginPath();
+      g.arc(5, -54, 3, Math.PI + 0.6, Math.PI * 2 - 0.3);
+      g.strokePath();
+      g.lineStyle(1.5, 0x3e2723);
+      g.lineBetween(3, -67, 8, -65);
+    }
+  }
+
+  /** Ran out of patience: frown, broken heart, and walk off a little faster. */
+  becomeUnhappy() {
+    this.leftUnhappy = true;
+    this.setMood('upset');
+    this.showPatience(false);
+    this.setSelected(false);
+    this.bubble.showAngry();
+    this.speed = SPEED.customer * PATIENCE.unhappySpeedMultiplier;
   }
 
   get isWaiting() {
-    return this.state === CustomerState.WAITING;
+    return this.fsm.is(CustomerState.WAITING);
   }
 
   /** Generous, finger-friendly hit box around the character. */
@@ -58,12 +155,20 @@ export default class Customer extends Character {
 
   /** Switch to the seated pose (used once the guest reaches their stool). */
   sit() {
-    this.state = CustomerState.SEATED;
     this.faceRight();
     this.shadow.setVisible(false);
     this.standingLegs.setVisible(false);
     this.seatedLegs.setVisible(true);
     this.figureBaseY = -6;
+    this.figure.y = this.figureBaseY;
+  }
+
+  /** Back to the standing pose, ready to walk away. */
+  stand() {
+    this.shadow.setVisible(true);
+    this.standingLegs.setVisible(true);
+    this.seatedLegs.setVisible(false);
+    this.figureBaseY = 0;
     this.figure.y = this.figureBaseY;
   }
 
@@ -129,10 +234,6 @@ export default class Customer extends Character {
     // Face
     g.fillStyle(0x222222);
     g.fillCircle(6, -62, 1.8);
-    g.lineStyle(1.5, 0x6d3b2e);
-    g.beginPath();
-    g.arc(5, -58, 3, 0.3, Math.PI - 0.6);
-    g.strokePath();
 
     return g;
   }

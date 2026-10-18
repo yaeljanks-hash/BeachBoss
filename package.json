@@ -1,0 +1,27 @@
+{
+  "name": "beachboss",
+  "version": "1.0.0",
+  "description": "A 2D beach restaurant time-management game built with Phaser.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yaeljanks-hash/BeachBoss.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/yaeljanks-hash/BeachBoss/issues"
+  },
+  "homepage": "https://github.com/yaeljanks-hash/BeachBoss#readme",
+  "dependencies": {
+    "phaser": "^4.2.1"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  }
+}

@@ -3,6 +3,7 @@ import StateMachine from '../systems/StateMachine.js';
 import SpeechBubble from '../ui/SpeechBubble.js';
 import ProgressBar from '../ui/ProgressBar.js';
 import { createMenuIcon } from '../ui/icons.js';
+import { SCALE, LAYOUT } from '../config.js';
 
 const WOOD = 0x8b5a3c;
 const WOOD_DARK = 0x6b4129;
@@ -31,7 +32,8 @@ export const GlowColor = {
 
 /**
  * A beach table with a stool on its left. The container origin is the floor
- * point under the table's centre.
+ * point under the table's centre. The artwork is drawn at its original size and
+ * the whole table is scaled by SCALE.table, so local offsets are unscaled.
  */
 export default class Table extends Phaser.GameObjects.Container {
   constructor(scene, x, floorY, number) {
@@ -41,9 +43,13 @@ export default class Table extends Phaser.GameObjects.Container {
     this.customer = null;
     this.fsm = new StateMachine(`Table ${number}`, TableState.EMPTY, TRANSITIONS);
 
-    // Where a guest sits and where the waitress stands to serve
-    this.seatSpot = { x: x - 75, y: floorY };
-    this.serviceSpot = { x: x + 78, y: floorY + 8 };
+    const s = SCALE.table;
+    this.setScale(s);
+
+    // Where a guest sits, and where the waitress stands to serve: in the
+    // walking lane, just in front of the table's right edge
+    this.seatSpot = { x: x - 75 * s, y: floorY };
+    this.serviceSpot = { x: x + 70 * s, y: LAYOUT.serviceY };
 
     this.glow = scene.add.ellipse(-10, 0, 190, 26, 0xffffff, 0.35).setVisible(false);
     this.glowColor = null;
@@ -83,7 +89,13 @@ export default class Table extends Phaser.GameObjects.Container {
 
   /** Tap area covers the table, the stool and a little margin for fingers. */
   containsPoint(px, py) {
-    return px >= this.x - 100 && px <= this.x + 65 && py >= this.y - 75 && py <= this.y + 35;
+    const s = this.scaleX;
+    return px >= this.x - 100 * s && px <= this.x + 65 * s && py >= this.y - 80 * s && py <= this.y + 35 * s;
+  }
+
+  /** A point `up` unscaled units above the floor (and `dx` across), in world space. */
+  pointAbove(up, dx = 0) {
+    return { x: this.x + dx * this.scaleX, y: this.y - up * this.scaleY };
   }
 
   // --- State changes --------------------------------------------------------

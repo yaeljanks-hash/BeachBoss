@@ -16,7 +16,8 @@ function formatTime(ms) {
 }
 
 /**
- * Gameplay HUD.
+ * Gameplay HUD. Fixed to the screen (scroll factor 0), so it stays put while the
+ * camera scrolls across the beach.
  *   Left panel:  level, shift countdown, guests served / lost
  *   Right panel: shift revenue vs target (with progress bar), total coins
  *   Centre:      hint line under the title
@@ -24,7 +25,7 @@ function formatTime(ms) {
 export default class Hud {
   constructor(scene, level) {
     this.scene = scene;
-    const add = obj => obj.setDepth(DEPTH.hud);
+    const add = obj => obj.setDepth(DEPTH.hud).setScrollFactor(0);
 
     // --- Left panel: level and time -----------------------------------------
     const left = add(scene.add.graphics());
@@ -66,13 +67,14 @@ export default class Hud {
     // --- Hint line ----------------------------------------------------------
     this.hintText = add(
       scene.add
-        .text(GAME_WIDTH / 2, 92, '', { fontSize: '16px', color: WHITE, fontStyle: 'bold' })
+        .text(GAME_WIDTH / 2, 92, '', { fontSize: '18px', color: WHITE, fontStyle: 'bold' })
         .setOrigin(0.5)
-        .setShadow(1, 1, '#1b4f72', 2)
+        .setStroke('#1b4f72', 4)
+        .setShadow(1, 1, '#0d2c40', 2)
     );
   }
 
-  /** Where flying coins should land. */
+  /** Where flying coins should land, in screen coordinates. */
   get coinTarget() {
     return { x: this.coinIcon.x, y: this.coinIcon.y };
   }

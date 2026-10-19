@@ -63,7 +63,7 @@ export const LEVELS = [
     name: 'Peak Hour',
     description: 'The busiest hour of the summer. Only a true Beach Boss can keep up!',
     shiftDurationMs: 180000,
-    revenueTarget: 195,
+    revenueTarget: 185,
     initialCustomers: 3,
     arrivalIntervalMs: { min: 5000, max: 7500 },
     maxQueue: 3,

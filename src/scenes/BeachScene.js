@@ -9,7 +9,10 @@ import BeachBar from '../objects/BeachBar.js';
 import Order, { OrderState } from '../objects/Order.js';
 import StateMachine from '../systems/StateMachine.js';
 import Shift from '../systems/Shift.js';
+import CameraController from '../systems/CameraController.js';
+import { drawBeachWorld } from '../world/drawBeachWorld.js';
 import Hud from '../ui/Hud.js';
+import OffscreenIndicators, { AttentionKind } from '../ui/OffscreenIndicators.js';
 import { createMenuIcon } from '../ui/icons.js';
 import { showToast, sparkle, coinReward } from '../ui/effects.js';
 
@@ -36,6 +39,10 @@ const GAME_TRANSITIONS = {
  * arrives, based on the state at that moment. That way a change of mind
  * mid-walk, or a timer firing during a walk, can never trigger a stale action.
  *
+ * The beach is wider than the screen. CameraController scrolls it (drag, swipe,
+ * mouse wheel, or following the waitress) and turns presses into taps, so a
+ * drag never triggers an action.
+ *
  * Restarting or advancing a level restarts this scene, which destroys every
  * object, timer and tween from the previous shift. Only the total coin balance
  * (kept in the game registry) carries over.
@@ -57,7 +64,7 @@ export default class BeachScene extends Phaser.Scene {
     this.shift = new Shift(this, this.level);
     if (!this.registry.has('totalCoins')) this.registry.set('totalCoins', 0);
 
-    this.drawBackground();
+    drawBeachWorld(this);
 
     this.tables = LAYOUT.tableXs.map((x, i) => new Table(this, x, LAYOUT.tableFloorY, i + 1));
     this.bar = new BeachBar(this, this.tables.length);
@@ -69,10 +76,16 @@ export default class BeachScene extends Phaser.Scene {
     this.lowTimeWarned = false;
 
     this.hud = new Hud(this, this.level);
+    this.indicators = new OffscreenIndicators(this);
     this.hud.setTotalCoins(this.registry.get('totalCoins'));
     this.refreshUi();
 
-    this.input.on('pointerdown', this.handleTap, this);
+    this.cameraController = new CameraController(this, {
+      target: this.waitress,
+      isTweening: () => this.tweens.isTweening(this.waitress),
+      canInteract: () => this.isPlaying,
+      onTap: (x, y, screenX, screenY) => this.handleTap(x, y, screenX, screenY)
+    });
 
     // Show the level intro; its Start button calls startShift()
     this.scene.launch('ShiftOverlay', { mode: 'intro', levelIndex: this.levelIndex });
@@ -83,6 +96,9 @@ export default class BeachScene extends Phaser.Scene {
   }
 
   update(time, delta) {
+    // The camera runs on real time, even when gameplay is sped up for testing
+    this.cameraController.update(delta);
+
     // Characters further down the screen are drawn in front
     this.waitress.setDepth(this.waitress.y);
     this.customers.forEach(customer => customer.setDepth(customer.y));
@@ -92,11 +108,16 @@ export default class BeachScene extends Phaser.Scene {
     // Scene time can be sped up (timeScale), so scale patience with it
     this.drainPatience(delta * this.time.timeScale);
 
+    const camera = this.cameras.main;
+    this.indicators.update(this.attentionItems(camera.scrollX, this.cameraController.viewWidth), camera.scrollX, this.cameraController.viewWidth);
+
     const remaining = this.shift.remainingMs;
     this.hud.setTime(remaining);
     if (!this.lowTimeWarned && remaining <= SHIFT.lowTimeWarningMs) {
       this.lowTimeWarned = true;
-      showToast(this, GAME_WIDTH / 2, 150, `${Math.round(SHIFT.lowTimeWarningMs / 1000)} seconds left!`, '#ffcc80');
+      showToast(this, GAME_WIDTH / 2, 150, `${Math.round(SHIFT.lowTimeWarningMs / 1000)} seconds left!`, '#ffcc80', {
+        fixed: true
+      });
     }
   }
 
@@ -128,6 +149,7 @@ export default class BeachScene extends Phaser.Scene {
 
     // Freeze the beach (timers, tweens, patience) and show the results
     this.hud.setTime(0);
+    this.indicators.hide();
     this.scene.pause();
     this.scene.launch('ShiftOverlay', {
       mode: 'results',
@@ -136,47 +158,6 @@ export default class BeachScene extends Phaser.Scene {
       totalCoins,
       earned: summary.revenue
     });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Scene setup
-  // ---------------------------------------------------------------------------
-
-  drawBackground() {
-    this.cameras.main.setBackgroundColor('#87CEEB');
-
-    // Sun (kept clear of the HUD panels)
-    this.add.circle(730, 52, 30, 0xfff176);
-
-    // Ocean with a few wave lines
-    this.add.rectangle(480, 230, 960, 250, 0x35b9cc);
-    const waves = this.add.graphics();
-    waves.lineStyle(3, 0xffffff, 0.35);
-    [[150, 180], [420, 240], [700, 200], [300, 300], [820, 290]].forEach(([x, y]) => {
-      waves.beginPath();
-      waves.arc(x, y, 14, Math.PI * 1.15, Math.PI * 1.85);
-      waves.strokePath();
-    });
-
-    // Sand
-    this.add.rectangle(480, 475, 960, 230, 0xf4d79b);
-
-    // Game title
-    this.add
-      .text(480, 55, 'BEACH BOSS', { fontSize: '42px', color: '#ffffff', fontStyle: 'bold' })
-      .setOrigin(0.5);
-
-    // Waiting area: a mat on the sand and a small sign
-    const { queueSpots } = LAYOUT;
-    const front = queueSpots[0];
-    const back = queueSpots[queueSpots.length - 1];
-    this.add.rectangle((front.x + back.x) / 2, front.y + 2, front.x - back.x + 60, 16, 0xd84315, 0.35);
-    const signX = front.x + 58;
-    this.add.rectangle(signX, 485, 4, 50, 0x6b4129);
-    this.add.rectangle(signX, 460, 70, 22, 0x8b5a3c);
-    this.add
-      .text(signX, 460, 'WAIT HERE', { fontSize: '11px', color: '#ffffff', fontStyle: 'bold' })
-      .setOrigin(0.5);
   }
 
   // ---------------------------------------------------------------------------
@@ -199,6 +180,53 @@ export default class BeachScene extends Phaser.Scene {
     this.hud.setRevenue(shift.revenue, shift.target);
     this.hud.setTime(shift.remainingMs);
     this.hud.setHint(this.currentHint(carried, anyoneWaiting, freeTable));
+  }
+
+  /**
+   * Everything that needs the player right now, for the off-screen indicators.
+   * Requests from impatient guests are the most urgent; cleaning comes last.
+   * `viewLeft`/`viewWidth` describe the visible part of the world.
+   *
+   * Each item's `x` is where the player would look (a table's speech bubble,
+   * above the guest), used to decide whether it is on screen; `panX` is where
+   * the camera centres when its indicator is tapped.
+   */
+  attentionItems(viewLeft, viewWidth) {
+    const items = [];
+    const carried = this.waitress.carrying;
+    const urgencyOf = patience => 1 - patience;
+
+    this.tables.forEach(table => {
+      const customer = table.customer;
+      const label = `T${table.number}`;
+      const bubbleX = table.x + table.bubble.x * table.scaleX;
+      const base = { x: bubbleX, panX: (bubbleX + table.x) / 2, label };
+      if (customer?.fsm.is(CustomerState.READY_TO_ORDER)) {
+        items.push({ ...base, key: `order-${table.number}`, kind: AttentionKind.ORDER, patience: customer.patience, urgency: urgencyOf(customer.patience) });
+      } else if (carried && customer?.order === carried && customer.fsm.is(CustomerState.WAITING_FOR_ORDER)) {
+        items.push({ ...base, key: `deliver-${table.number}`, kind: AttentionKind.DELIVER, item: carried.item, patience: customer.patience, urgency: urgencyOf(customer.patience) });
+      } else if (table.isDirty) {
+        items.push({ ...base, key: `clean-${table.number}`, kind: AttentionKind.CLEAN, patience: null, urgency: 0 });
+      }
+    });
+
+    // A finished order the waitress could pick up now
+    const ready = this.bar.readyOrders[0];
+    if (ready && this.waitress.handsFree) {
+      items.push({ key: 'pickup', kind: AttentionKind.PICKUP, x: this.bar.messagePoint.x, label: 'Bar', item: ready.item, patience: ready.customer.patience, urgency: urgencyOf(ready.customer.patience) });
+    }
+
+    // Guests are waiting and no free table is on screen: point at the nearest free one
+    const waiting = this.queue.filter(c => c.isWaiting);
+    const free = this.tables.filter(t => t.isAvailable);
+    const isVisible = x => x >= viewLeft && x <= viewLeft + viewWidth;
+    if (waiting.length && free.length && !free.some(t => isVisible(t.x))) {
+      const center = viewLeft + viewWidth / 2;
+      const table = free.reduce((a, b) => (Math.abs(b.x - center) < Math.abs(a.x - center) ? b : a));
+      const patience = Math.min(...waiting.map(c => c.patience));
+      items.push({ key: `seat-${table.number}`, kind: AttentionKind.SEAT, x: table.x, label: `T${table.number}`, patience, urgency: urgencyOf(patience) });
+    }
+    return items;
   }
 
   /** The most useful next step for the player, in priority order. */
@@ -268,7 +296,7 @@ export default class BeachScene extends Phaser.Scene {
           customer.fsm.transition(CustomerState.WAITING);
           customer.showPatience(true);
         }
-        customer.faceRight();
+        customer.faceLeft(); // towards the restaurant
         this.refreshUi();
       });
     });
@@ -302,7 +330,8 @@ export default class BeachScene extends Phaser.Scene {
     this.shift.recordLost();
     customer.becomeUnhappy();
     if (this.selectedCustomer === customer) this.selectedCustomer = null;
-    showToast(this, customer.x, customer.y - 120, 'Left unhappy', '#ff8a80');
+    const above = customer.pointAbove(110);
+    showToast(this, above.x, above.y, 'Left unhappy', '#ff8a80');
 
     let exitPath;
     if (table) {
@@ -318,7 +347,7 @@ export default class BeachScene extends Phaser.Scene {
       // In line: step out and walk back the way they came
       this.queue = this.queue.filter(c => c !== customer);
       this.moveQueueForward();
-      exitPath = [{ x: LAYOUT.spawnPoint.x - 20, y: customer.y }];
+      exitPath = [{ x: LAYOUT.spawnPoint.x + 20, y: customer.y }];
     }
 
     customer.walkPath(exitPath, () => this.removeCustomer(customer));
@@ -332,7 +361,8 @@ export default class BeachScene extends Phaser.Scene {
     this.bar.discardOrder(order);
     if (this.waitress.carrying === order) {
       this.waitress.dropCarried();
-      showToast(this, this.waitress.x, this.waitress.y - 110, 'Order wasted', '#ffcc80');
+      const above = this.waitress.pointAbove(105);
+      showToast(this, above.x, above.y, 'Order wasted', '#ffcc80');
     }
   }
 
@@ -354,8 +384,10 @@ export default class BeachScene extends Phaser.Scene {
     this.queue = this.queue.filter(c => c !== customer);
     if (this.selectedCustomer === customer) this.selectCustomer(customer); // clears selection
 
-    // The guest walks over on their own; the waitress carries on with her job
-    customer.walkTo(table.seatSpot.x, table.seatSpot.y, () => this.onCustomerSeated(customer, table));
+    // The guest walks over on their own, in front of the furniture and then up
+    // to the stool; the waitress carries on with her job
+    const { seatSpot } = table;
+    customer.walkPath([{ x: seatSpot.x, y: LAYOUT.guestWalkY }, seatSpot], () => this.onCustomerSeated(customer, table));
 
     this.moveQueueForward();
     this.refreshUi();
@@ -399,8 +431,10 @@ export default class BeachScene extends Phaser.Scene {
     this.waitress.dropCarried();
     table.bubble.hide();
     table.showServedItem(order.item);
-    sparkle(this, table.x - 28, table.y - 70);
-    showToast(this, table.x - 40, table.y - 110, 'Yum!', '#fff59d');
+    const item = table.pointAbove(70, -28);
+    sparkle(this, item.x, item.y);
+    const above = table.pointAbove(110, -40);
+    showToast(this, above.x, above.y, 'Yum!', '#fff59d');
 
     // Consume the item, then pay
     this.tweens.addCounter({
@@ -421,8 +455,9 @@ export default class BeachScene extends Phaser.Scene {
     const justReachedTarget = this.shift.addRevenue(amount);
 
     table.clearServedItem();
-    sparkle(this, customer.x, customer.y - 60, [0xffd54f, 0xffffff, 0xffb300]);
-    coinReward(this, { x: customer.x, y: customer.y - 95 }, amount, this.hud.coinTarget, () =>
+    const chest = customer.pointAbove(60);
+    sparkle(this, chest.x, chest.y, [0xffd54f, 0xffffff, 0xffb300]);
+    coinReward(this, customer.pointAbove(95), amount, this.hud.coinTarget, () =>
       this.hud.setRevenue(this.shift.revenue, this.shift.target, true)
     );
     if (justReachedTarget) this.celebrateTarget();
@@ -452,9 +487,11 @@ export default class BeachScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setStroke('#1b5e20', 5)
       .setDepth(DEPTH.hud)
+      .setScrollFactor(0)
       .setScale(0);
-    sparkle(this, GAME_WIDTH / 2 - 110, 170, [0xb9f6ca, 0xffffff, 0xffd54f]);
-    sparkle(this, GAME_WIDTH / 2 + 110, 170, [0xb9f6ca, 0xffffff, 0xffd54f]);
+    const colors = [0xb9f6ca, 0xffffff, 0xffd54f];
+    sparkle(this, GAME_WIDTH / 2 - 110, 170, colors, { fixed: true });
+    sparkle(this, GAME_WIDTH / 2 + 110, 170, colors, { fixed: true });
     this.tweens.add({ targets: banner, scale: 1, duration: 300, ease: 'Back.easeOut' });
     this.tweens.add({ targets: banner, alpha: 0, y: 150, delay: 1600, duration: 500, onComplete: () => banner.destroy() });
   }
@@ -473,7 +510,7 @@ export default class BeachScene extends Phaser.Scene {
     rejected.forEach(order => waitress.addTicket(order));
     if (tickets.length > rejected.length) {
       didSomething = true;
-      showToast(this, bar.x + 90, bar.y - 10, tickets.length > 1 ? 'Orders placed!' : 'Order placed!');
+      showToast(this, bar.messagePoint.x, bar.messagePoint.y, tickets.length > 1 ? 'Orders placed!' : 'Order placed!');
     }
 
     // Pick up a finished order if her hands are free
@@ -489,13 +526,14 @@ export default class BeachScene extends Phaser.Scene {
       let message = 'Nothing to pick up';
       if (!waitress.handsFree && bar.hasReadyOrder) message = 'Hands full - deliver first!';
       else if (bar.slots.some(s => s.order)) message = 'Still preparing...';
-      showToast(this, bar.x + 90, bar.y - 10, message);
+      showToast(this, bar.messagePoint.x, bar.messagePoint.y, message);
     }
     this.refreshUi();
   }
 
   onOrderReady(order) {
-    showToast(this, this.bar.x + 90, this.bar.y - 10, `${order.item.name} ready!`, '#c8e6c9');
+    const { x, y } = this.bar.messagePoint;
+    showToast(this, x, y, `${order.item.name} ready!`, '#c8e6c9');
     this.refreshUi();
   }
 
@@ -510,7 +548,8 @@ export default class BeachScene extends Phaser.Scene {
       onComplete: () => {
         this.waitress.finishActivity();
         if (!table.finishCleaning()) return;
-        sparkle(this, table.x, table.y - 60);
+        const top = table.pointAbove(60);
+        sparkle(this, top.x, top.y);
         this.refreshUi();
       }
     });
@@ -528,11 +567,22 @@ export default class BeachScene extends Phaser.Scene {
   // Input
   // ---------------------------------------------------------------------------
 
-  handleTap(pointer) {
+  /** Send the waitress somewhere, and have the camera follow her there. */
+  sendWaitress(x, y, onArrive) {
+    this.waitress.walkTo(x, y, onArrive);
+    this.cameraController.follow(x);
+  }
+
+  /** A tap (not a drag) at world point (x, y), from CameraController. */
+  handleTap(x, y, screenX, screenY) {
     if (!this.isPlaying) return;
 
-    const x = pointer.worldX;
-    const y = pointer.worldY;
+    // Off-screen indicators sit on top of the world: they only move the camera
+    const request = this.indicators.hitTest(screenX, screenY);
+    if (request) {
+      this.cameraController.panTo(request.panX ?? request.x);
+      return;
+    }
 
     const customer = this.queue.find(c => c.isWaiting && c.containsPoint(x, y));
     if (customer) {
@@ -542,7 +592,7 @@ export default class BeachScene extends Phaser.Scene {
 
     if (this.bar.containsPoint(x, y)) {
       const spot = this.bar.serviceSpot;
-      this.waitress.walkTo(spot.x, spot.y, () => this.onBarArrival());
+      this.sendWaitress(spot.x, spot.y, () => this.onBarArrival());
       return;
     }
 
@@ -553,7 +603,7 @@ export default class BeachScene extends Phaser.Scene {
     }
 
     const { minX, maxX, minY, maxY } = LAYOUT.walkArea;
-    this.waitress.walkTo(Phaser.Math.Clamp(x, minX, maxX), Phaser.Math.Clamp(y, minY, maxY));
+    this.sendWaitress(Phaser.Math.Clamp(x, minX, maxX), Phaser.Math.Clamp(y, minY, maxY));
   }
 
   handleTableTap(table) {
@@ -567,14 +617,15 @@ export default class BeachScene extends Phaser.Scene {
     }
 
     // Everything else happens once the waitress gets there
-    this.waitress.walkTo(table.serviceSpot.x, table.serviceSpot.y, () => this.onTableArrival(table));
+    this.sendWaitress(table.serviceSpot.x, table.serviceSpot.y, () => this.onTableArrival(table));
   }
 
   /** Decide what the waitress does at a table, based on its state right now. */
   onTableArrival(table) {
     if (!this.isPlaying) return;
 
-    const say = message => showToast(this, table.x, table.y - 100, message);
+    const above = table.pointAbove(100);
+    const say = message => showToast(this, above.x, above.y, message);
     const customer = table.customer;
     const carried = this.waitress.carrying;
 

@@ -1,11 +1,14 @@
 import Phaser from 'phaser';
+import { SCALE } from '../config.js';
 
 /**
  * Base class for anyone who walks around the beach.
  *
  * The container's origin sits at the character's feet, so `y` doubles as the
  * depth-sorting value. Subclasses draw their artwork into `this.figure`,
- * facing right; the figure is mirrored when walking left.
+ * facing right; the figure is mirrored when walking left. Artwork is drawn at
+ * its original size and the whole character is scaled by SCALE.character, so
+ * local offsets (hit boxes, bubbles) are given in unscaled units.
  */
 export default class Character extends Phaser.GameObjects.Container {
   constructor(scene, x, y, speed) {
@@ -18,11 +21,17 @@ export default class Character extends Phaser.GameObjects.Container {
     this.figure = scene.add.container(0, 0);
     this.add([this.shadow, this.figure]);
 
+    this.setScale(SCALE.character);
     scene.add.existing(this);
   }
 
+  /** A point `up` unscaled units above the character's feet, in world space. */
+  pointAbove(up) {
+    return { x: this.x, y: this.y - up * this.scaleY };
+  }
+
   /** Walk smoothly to (x, y) at this character's speed, then call onArrive. */
-  walkTo(x, y, onArrive) {
+  walkTo(x, y, onArrive, ease = 'Sine.easeInOut') {
     this.stopWalking();
 
     const distance = Phaser.Math.Distance.Between(this.x, this.y, x, y);
@@ -39,7 +48,7 @@ export default class Character extends Phaser.GameObjects.Container {
       x,
       y,
       duration: (distance / this.speed) * 1000,
-      ease: 'Sine.easeInOut',
+      ease,
       onComplete: () => {
         this.stopBob();
         onArrive?.();
@@ -47,14 +56,23 @@ export default class Character extends Phaser.GameObjects.Container {
     });
   }
 
-  /** Walk through a list of {x, y} points in order, then call onArrive. */
-  walkPath(points, onArrive) {
+  /**
+   * Walk through a list of {x, y} points in order, then call onArrive. Only the
+   * first leg speeds up and only the last slows down, so there is no stop at
+   * each corner.
+   */
+  walkPath(points, onArrive, isFirstLeg = true) {
     const [next, ...rest] = points;
     if (!next) {
       onArrive?.();
       return;
     }
-    this.walkTo(next.x, next.y, () => this.walkPath(rest, onArrive));
+    const isLastLeg = rest.length === 0;
+    let ease = 'Linear';
+    if (isFirstLeg && isLastLeg) ease = 'Sine.easeInOut';
+    else if (isFirstLeg) ease = 'Sine.easeIn';
+    else if (isLastLeg) ease = 'Sine.easeOut';
+    this.walkTo(next.x, next.y, () => this.walkPath(rest, onArrive, false), ease);
   }
 
   stopWalking() {
@@ -71,6 +89,10 @@ export default class Character extends Phaser.GameObjects.Container {
 
   faceRight() {
     this.figure.scaleX = 1;
+  }
+
+  faceLeft() {
+    this.figure.scaleX = -1;
   }
 
   // Small up-and-down bounce that reads as walking

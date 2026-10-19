@@ -1,43 +1,85 @@
-// Shared layout and tuning values. All coordinates are in the 960x540 game space;
-// Phaser's FIT scale mode stretches that space to whatever screen the game runs on.
+// Shared layout and tuning values.
+//
+// The screen (viewport) is 960x540 game units; Phaser's FIT scale mode stretches
+// it to whatever screen the game runs on. The world is much wider than the
+// screen and the camera scrolls sideways across it. All LAYOUT coordinates are
+// world coordinates.
+//
 // Menu items live in ./data/menu.js; per-level difficulty lives in ./data/levels.js.
 
 export const GAME_WIDTH = 960;
 export const GAME_HEIGHT = 540;
 
+// The whole beach. Only the width is larger than the screen: the camera never
+// scrolls vertically.
+export const WORLD = {
+  width: 2400,
+  height: GAME_HEIGHT
+};
+
+// Characters, tables and the bar are drawn at their original size and scaled up
+// by these factors, so their artwork and hit boxes stay in proportion.
+export const SCALE = {
+  character: 1.5,
+  table: 1.5,
+  bar: 1.5
+};
+
 export const LAYOUT = {
-  sandTop: 360,
+  horizonY: 105, // top of the ocean
+  sandTop: 330,
 
-  // Area of the sand the waitress is allowed to walk on
-  walkArea: { minX: 20, maxX: 940, minY: 420, maxY: 528 },
+  // Wooden deck the restaurant stands on
+  deck: { minX: 30, maxX: 1480, top: 418 },
 
-  // Tables stand on this floor line
+  // The waitress walks in a lane in front of all furniture, so she can never
+  // pass through a table or the bar. Everything she visits is inside this band.
+  walkArea: { minX: 40, maxX: 2340, minY: 470, maxY: 528 },
+  serviceY: 478, // where she stands to use a table or the bar
+
+  // Tables stand on this floor line, behind the walking lane
   tableFloorY: 440,
-  tableXs: [380, 580, 780],
+  tableXs: [620, 950, 1280],
 
-  // Beach bar footprint and where the waitress stands to use it
-  bar: { x: 40, y: 270, width: 180, height: 145 },
-  barServiceSpot: { x: 250, y: 425 },
+  // Beach bar footprint (left edge and bottom), and where the waitress stands
+  // to use it (in front of the counter)
+  bar: { x: 70, bottom: 440, width: 180, height: 145 },
+  barServiceSpot: { x: 300, y: 478 },
 
-  // Where customers enter, and where they line up (index 0 = front of the line)
-  spawnPoint: { x: -40, y: 505 },
+  // Guests arrive from the right edge and line up facing the restaurant
+  // (index 0 = front of the line)
+  spawnPoint: { x: WORLD.width + 60, y: 482 },
   queueSpots: [
-    { x: 180, y: 505 },
-    { x: 125, y: 505 },
-    { x: 70, y: 505 }
+    { x: 1600, y: 482 },
+    { x: 1690, y: 482 },
+    { x: 1780, y: 482 }
   ],
+  // Seated guests walk along this line, then step up to their stool
+  guestWalkY: 482,
 
   // Leaving guests walk down to this lane, then off the right edge
   exitLaneY: 528,
-  exitX: 1010,
+  exitX: WORLD.width + 70,
 
-  waitressStart: { x: 480, y: 500 }
+  waitressStart: { x: 800, y: 500 }
 };
 
-// Movement speeds in pixels per second
+// Movement speeds in world units per second. They are scaled with the
+// characters so trips take about as long as in v1.0 (bar -> farthest table
+// is about 2.1 s, against 2.0 s before the world got bigger).
 export const SPEED = {
-  waitress: 300,
-  customer: 130
+  waitress: 520,
+  customer: 240
+};
+
+// Camera behaviour (distances in screen units)
+export const CAMERA = {
+  dragThreshold: 12, // a press that moves less than this is a tap
+  followMargin: 170, // keep the waitress at least this far from the screen edges
+  followSharpness: 6, // how quickly the camera catches up while following (per second)
+  flingFriction: 4, // how quickly a swipe's momentum dies away (per second)
+  maxFlingSpeed: 3000, // units per second
+  wheelSpeed: 1 // mouse wheel / trackpad scroll multiplier
 };
 
 // Arrival timing shared by all levels. How many guests open the shift and how

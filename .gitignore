@@ -3,3 +3,5 @@ node_modules/
 dist/
 .env
 .env.local
+# QA screenshots (npm run qa with QA_SCREENSHOTS=qa-output)
+qa-output/

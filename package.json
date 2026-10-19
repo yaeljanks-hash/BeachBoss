@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "qa": "node qa/run.mjs",
+    "qa:balance": "node qa/balance.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

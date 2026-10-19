@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { OrderState } from './Order.js';
 import ProgressBar from '../ui/ProgressBar.js';
 import { createMenuIcon } from '../ui/icons.js';
-import { LAYOUT } from '../config.js';
+import { LAYOUT, SCALE } from '../config.js';
 
 const SLOT_PREPARING_ALPHA = 0.45;
 
@@ -12,11 +12,14 @@ const SLOT_PREPARING_ALPHA = 0.45;
  * It has one counter slot per table, so each order always has a place. Orders
  * are prepared in parallel; each slot shows the item, its table number and a
  * progress bar, then a "READY" tag once it can be picked up.
+ *
+ * The container origin is the top-left corner of the roof. The artwork is
+ * drawn at its original size and scaled by SCALE.bar.
  */
 export default class BeachBar extends Phaser.GameObjects.Container {
   constructor(scene, slotCount) {
-    const { x, y, width, height } = LAYOUT.bar;
-    super(scene, x, y);
+    const { x, bottom, width, height } = LAYOUT.bar;
+    super(scene, x, bottom - height * SCALE.bar);
 
     this.barWidth = width;
     this.barHeight = height;
@@ -25,16 +28,23 @@ export default class BeachBar extends Phaser.GameObjects.Container {
     this.add(this.drawBar(scene));
     this.slots = this.createSlots(scene, slotCount);
 
+    this.setScale(SCALE.bar);
     scene.add.existing(this);
   }
 
   containsPoint(px, py) {
+    const s = this.scaleX;
     return (
-      px >= this.x - 10 &&
-      px <= this.x + this.barWidth + 10 &&
-      py >= this.y - 5 &&
-      py <= this.y + this.barHeight + 10
+      px >= this.x - 10 * s &&
+      px <= this.x + (this.barWidth + 10) * s &&
+      py >= this.y - 5 * s &&
+      py <= this.y + (this.barHeight + 10) * s
     );
+  }
+
+  /** Where messages about the bar appear, in world space. */
+  get messagePoint() {
+    return { x: this.x + (this.barWidth / 2) * this.scaleX, y: this.y - 10 };
   }
 
   get readyOrders() {

@@ -146,7 +146,8 @@ export default class Customer extends Character {
 
   /** Generous, finger-friendly hit box around the character. */
   containsPoint(x, y) {
-    return Math.abs(x - this.x) <= 24 && y >= this.y - 84 && y <= this.y + 10;
+    const s = this.scaleX;
+    return Math.abs(x - this.x) <= 26 * s && y >= this.y - 86 * s && y <= this.y + 12 * s;
   }
 
   setSelected(selected) {
